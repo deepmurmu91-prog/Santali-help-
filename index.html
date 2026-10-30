@@ -1,0 +1,354 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Santali Help</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#eaf1f5;color:#17252b}
+header{background:#075e54;color:white;padding:16px;display:flex;justify-content:space-between;align-items:center}
+header h2{margin:0;font-size:21px}
+button{border:0;border-radius:8px;padding:11px 15px;background:#087e70;color:white;font-weight:bold;cursor:pointer}
+input{width:100%;padding:13px;margin:7px 0;border:1px solid #ccd5d8;border-radius:8px;font-size:15px}
+.card{background:white;padding:18px;margin:15px auto;border-radius:12px;max-width:500px}
+.hidden{display:none!important}
+.user{padding:13px;border-bottom:1px solid #ddd;cursor:pointer}
+.user:hover{background:#eef8f5}
+#messages{height:48vh;overflow-y:auto;background:#e5ddd5;padding:12px;border-radius:8px}
+.msg{padding:9px 12px;margin:7px 0;border-radius:10px;background:white;max-width:85%;overflow-wrap:anywhere}
+.mine{background:#d5f8c6;margin-left:auto}
+small{color:#667}
+#chatbar{display:flex;gap:7px;margin-top:8px}
+#chatbar input{flex:1;min-width:0}
+#chatbar button{padding:10px}
+</style>
+</head>
+<body>
+
+<header>
+  <h2>🟢 Santali Help</h2>
+  <button id="langBtn">বাংলা</button>
+</header>
+
+<section id="auth" class="card">
+  <h2 id="welcome">Welcome to Santali Help</h2>
+  <input id="name" placeholder="Your name">
+  <input id="email" type="email" placeholder="Email address">
+  <input id="password" type="password" placeholder="Password (minimum 6 characters)">
+  <button id="registerBtn">Create Account</button>
+  <button id="loginBtn">Login</button>
+  <p id="status"></p>
+</section>
+
+<section id="home" class="hidden">
+  <div class="card">
+    <h3 id="profileTitle">My Profile</h3>
+    <p id="myName"></p>
+    <p id="myEmail"></p>
+    <button id="logoutBtn">Logout</button>
+  </div>
+
+  <div class="card">
+    <h3 id="peopleTitle">People on Santali Help</h3>
+    <button id="refreshBtn">Refresh Users</button>
+    <div id="users"></div>
+  </div>
+</section>
+
+<section id="chatScreen" class="card hidden">
+  <button id="backBtn">← Back</button>
+  <h3 id="chatName">Chat</h3>
+  <div id="messages"></div>
+  <div id="chatbar">
+    <input id="messageInput" placeholder="Type a message...">
+    <button id="sendBtn">Send</button>
+  </div>
+</section>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js";
+
+import {
+  getAuth, createUserWithEmailAndPassword,
+  signInWithEmailAndPassword, signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js";
+
+import {
+  getFirestore, doc, setDoc, getDoc, collection,
+  getDocs, query, where, addDoc, onSnapshot,
+  serverTimestamp, updateDoc, orderBy
+} from "https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyA06I-Jfl3AI51ToMqYjvtlNdoC5_Hz4ow",
+  authDomain: "santali-help.firebaseapp.com",
+  projectId: "santali-help",
+  storageBucket: "santali-help.firebasestorage.app",
+  messagingSenderId: "697823529978",
+  appId: "1:697823529978:web:a0d68c90c05d84f5eeb243"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentUser = null;
+let currentChatId = null;
+let unsubscribeMessages = null;
+let language = "en";
+let selectedUser = null;
+
+const $ = id => document.getElementById(id);
+
+const words = {
+  en: {
+    welcome:"Welcome to Santali Help",
+    name:"Your name", email:"Email address",
+    password:"Password (minimum 6 characters)",
+    register:"Create Account", login:"Login",
+    profile:"My Profile", people:"People on Santali Help",
+    refresh:"Refresh Users", logout:"Logout",
+    send:"Send", message:"Type a message...",
+    back:"← Back", chat:"Chat",
+    noUsers:"No other users found yet.",
+    loading:"Loading...",
+    lang:"বাংলা"
+  },
+  bn: {
+    welcome:"সান্তালি হেল্পে স্বাগতম",
+    name:"তোমার নাম", email:"ইমেল ঠিকানা",
+    password:"পাসওয়ার্ড (কমপক্ষে ৬ অক্ষর)",
+    register:"নতুন অ্যাকাউন্ট তৈরি", login:"লগইন",
+    profile:"আমার প্রোফাইল", people:"সান্তালি হেল্প ব্যবহারকারীরা",
+    refresh:"ব্যবহারকারী রিফ্রেশ", logout:"লগআউট",
+    send:"পাঠাও", message:"মেসেজ লেখো...",
+    back:"← ফিরে যাও", chat:"চ্যাট",
+    noUsers:"এখনও অন্য কোনো ব্যবহারকারী পাওয়া যায়নি।",
+    loading:"লোড হচ্ছে...",
+    lang:"English"
+  }
+};
+
+function applyLanguage(){
+  const w = words[language];
+  $("welcome").textContent=w.welcome;
+  $("name").placeholder=w.name;
+  $("email").placeholder=w.email;
+  $("password").placeholder=w.password;
+  $("registerBtn").textContent=w.register;
+  $("loginBtn").textContent=w.login;
+  $("profileTitle").textContent=w.profile;
+  $("peopleTitle").textContent=w.people;
+  $("refreshBtn").textContent=w.refresh;
+  $("logoutBtn").textContent=w.logout;
+  $("sendBtn").textContent=w.send;
+  $("messageInput").placeholder=w.message;
+  $("backBtn").textContent=w.back;
+  $("langBtn").textContent=w.lang;
+}
+$("langBtn").onclick=()=>{
+  language=language==="en"?"bn":"en";
+  applyLanguage();
+};
+applyLanguage();
+
+function showStatus(message){
+  $("status").textContent=message;
+}
+
+$("registerBtn").onclick=async()=>{
+  const name=$("name").value.trim();
+  const email=$("email").value.trim();
+  const password=$("password").value;
+
+  if(!name || !email || password.length<6){
+    showStatus("Enter name, valid email and password (6+ characters).");
+    return;
+  }
+
+  try{
+    showStatus("Creating account...");
+    const result=await createUserWithEmailAndPassword(auth,email,password);
+    await setDoc(doc(db,"users",result.user.uid),{
+      uid:result.user.uid,
+      name:name,
+      email:email,
+      photoURL:"",
+      about:"",
+      createdAt:serverTimestamp(),
+      lastSeen:serverTimestamp()
+    });
+    showStatus("Account created!");
+  }catch(error){
+    showStatus(error.message);
+  }
+};
+
+$("loginBtn").onclick=async()=>{
+  const email=$("email").value.trim();
+  const password=$("password").value;
+  try{
+    showStatus("Logging in...");
+    await signInWithEmailAndPassword(auth,email,password);
+  }catch(error){
+    showStatus(error.message);
+  }
+};
+
+$("logoutBtn").onclick=async()=>{
+  if(unsubscribeMessages) unsubscribeMessages();
+  await signOut(auth);
+};
+
+onAuthStateChanged(auth,async user=>{
+  currentUser=user;
+  if(user){
+    $("auth").classList.add("hidden");
+    $("home").classList.remove("hidden");
+    $("chatScreen").classList.add("hidden");
+
+    try{
+      const snap=await getDoc(doc(db,"users",user.uid));
+      if(snap.exists()){
+        const data=snap.data();
+        $("myName").textContent="Name: "+data.name;
+        $("myEmail").textContent="Email: "+data.email;
+      }
+      await updateDoc(doc(db,"users",user.uid),{
+        lastSeen:serverTimestamp()
+      });
+      await loadUsers();
+    }catch(error){
+      showStatus(error.message);
+    }
+  }else{
+    $("auth").classList.remove("hidden");
+    $("home").classList.add("hidden");
+    $("chatScreen").classList.add("hidden");
+  }
+});
+
+async function loadUsers(){
+  $("users").textContent=words[language].loading;
+  try{
+    const snap=await getDocs(collection(db,"users"));
+    $("users").innerHTML="";
+    let found=0;
+
+    snap.forEach(userDoc=>{
+      const user=userDoc.data();
+      if(user.uid===currentUser.uid)return;
+      found++;
+
+      const item=document.createElement("div");
+      item.className="user";
+      item.textContent="👤 "+(user.name||"User")+" · "+(user.email||"");
+      item.onclick=()=>openChat(user);
+      $("users").appendChild(item);
+    });
+
+    if(!found){
+      $("users").textContent=words[language].noUsers;
+    }
+  }catch(error){
+    $("users").textContent=error.message;
+  }
+}
+
+$("refreshBtn").onclick=loadUsers;
+
+async function openChat(user){
+  selectedUser=user;
+  $("home").classList.add("hidden");
+  $("chatScreen").classList.remove("hidden");
+  $("chatName").textContent=user.name||"Chat";
+  $("messages").innerHTML="Loading...";
+
+  try{
+    const members=[currentUser.uid,user.uid].sort();
+    const chatsRef=collection(db,"chats");
+    const q=query(chatsRef,where("members","==",members));
+    const snap=await getDocs(q);
+
+    if(!snap.empty){
+      currentChatId=snap.docs[0].id;
+    }else{
+      const newChat=await addDoc(chatsRef,{
+        members:members,
+        type:"private",
+        createdAt:serverTimestamp(),
+        lastMessage:"",
+        lastMessageAt:serverTimestamp()
+      });
+      currentChatId=newChat.id;
+    }
+    listenMessages();
+  }catch(error){
+    $("messages").textContent=error.message;
+  }
+}
+
+function listenMessages(){
+  if(unsubscribeMessages)unsubscribeMessages();
+
+  const messagesRef=collection(db,"chats",currentChatId,"messages");
+  const q=query(messagesRef,orderBy("createdAt","asc"));
+
+  unsubscribeMessages=onSnapshot(q,snapshot=>{
+    $("messages").innerHTML="";
+    snapshot.forEach(messageDoc=>{
+      const m=messageDoc.data();
+      const bubble=document.createElement("div");
+      bubble.className="msg "+(m.senderId===currentUser.uid?"mine":"");
+      bubble.textContent=m.text||"";
+      $("messages").appendChild(bubble);
+    });
+    $("messages").scrollTop=$("messages").scrollHeight;
+  },error=>{
+    $("messages").textContent=error.message;
+  });
+}
+
+$("sendBtn").onclick=sendMessage;
+$("messageInput").addEventListener("keydown",event=>{
+  if(event.key==="Enter")sendMessage();
+});
+
+async function sendMessage(){
+  const text=$("messageInput").value.trim();
+  if(!text || !currentChatId)return;
+
+  $("sendBtn").disabled=true;
+  try{
+    await addDoc(collection(db,"chats",currentChatId,"messages"),{
+      senderId:currentUser.uid,
+      text:text,
+      createdAt:serverTimestamp()
+    });
+
+    await updateDoc(doc(db,"chats",currentChatId),{
+      lastMessage:text,
+      lastMessageAt:serverTimestamp()
+    });
+
+    $("messageInput").value="";
+  }catch(error){
+    alert(error.message);
+  }
+  $("sendBtn").disabled=false;
+}
+
+$("backBtn").onclick=()=>{
+  if(unsubscribeMessages)unsubscribeMessages();
+  unsubscribeMessages=null;
+  currentChatId=null;
+  $("chatScreen").classList.add("hidden");
+  $("home").classList.remove("hidden");
+};
+
+</script>
+</body>
+</html>
